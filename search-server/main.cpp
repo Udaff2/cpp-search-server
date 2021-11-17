@@ -100,9 +100,8 @@ public:
     }
     
     vector<Document> FindTopDocuments(const string& raw_query,  DocumentStatus input_status = DocumentStatus::ACTUAL) const {
-        auto matched_documents = FindTopDocuments(raw_query, [input_status](int document_id, 
+        return FindTopDocuments(raw_query, [input_status](int document_id, 
             DocumentStatus status, int rating) { return status == input_status; });
-        return matched_documents;
     }
 
     int GetDocumentCount() const {
@@ -175,7 +174,6 @@ private:
 
     QueryWord ParseQueryWord(string text) const {
         bool is_minus = false;
-        // Word shouldn't be empty
         if (text[0] == '-') {
             is_minus = true;
             text = text.substr(1);
@@ -208,7 +206,6 @@ private:
         return query;
     }
 
-    // Existence required
     double ComputeWordInverseDocumentFreq(const string& word) const {
         return log(GetDocumentCount() * 1.0 / word_to_document_freqs_.at(word).size());
     }
@@ -216,13 +213,15 @@ private:
     template <typename SearchPredicate>
     vector<Document> FindAllDocuments(const Query& query, SearchPredicate search_predicate) const {
         map<int, double> document_to_relevance;
+        DocumentData map_selection;
         for (const string& word : query.plus_words) {
             if (word_to_document_freqs_.count(word) == 0) {
                 continue;
             }
             const double inverse_document_freq = ComputeWordInverseDocumentFreq(word);
             for (const auto [document_id, term_freq] : word_to_document_freqs_.at(word)) {
-                if (search_predicate(document_id, documents_.at(document_id).status, documents_.at(document_id).rating)) {
+                map_selection = documents_.at(document_id);
+                if (search_predicate(document_id, map_selection.status, map_selection.rating)) {
                     document_to_relevance[document_id] += term_freq * inverse_document_freq;
                 }
             }
