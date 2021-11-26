@@ -256,7 +256,258 @@ void PrintDocument(const Document& document) {
         << " }"s << endl;
 }
 
+ostream &operator<<(ostream &os, DocumentStatus status) {
+  return os << static_cast<int>(status);
+}
+
+template <typename Element , typename Element2>
+ostream& operator<<(ostream& out, const map<Element, Element2>& container) {
+    int size = 0;
+    for (auto [element_1, element_2] : container) {
+        ++size;
+        if (size == container.size()) {
+            out << element_1 << ": " << element_2;
+        } else {
+            out << element_1 << ": " << element_2 << ", ";
+        }
+        
+    }
+    return out;
+} 
+
+template <typename Element>
+ostream& operator<<(ostream& out, const vector<Element>& container) {
+    int size = 0;
+    for (const Element& element : container) {
+        ++size;
+        if (size == container.size()) {
+            out << element;
+        } else {
+            out << element << ", "s;
+        }
+    }
+    return out;
+} 
+
+template <typename Element>
+ostream& operator<<(ostream& out, const set<Element>& container) {
+    int size = 0;
+    for (const Element& element : container) {
+        ++size;
+        if (size == container.size()) {
+            out << element;
+        } else {
+            out << element << ", "s;
+        }
+    }
+    return out;
+} 
+
+template <typename Func>
+void RunTestImpl(Func& func, const string funct_string) {
+    func();
+    cout << funct_string << " OK" << endl;
+}
+
+template <typename T, typename U>
+void AssertEqualImpl(const T& t, const U& u, const string& t_str, const string& u_str, const string& file,
+                     const string& func, unsigned line, const string& hint) {
+    if (t != u) {
+        cout << boolalpha;
+        cout << file << "("s << line << "): "s << func << ": "s;
+        cout << "ASSERT_EQUAL("s << t_str << ", "s << u_str << ") failed: "s;
+        cout << t << " != "s << u << "."s;
+        if (!hint.empty()) {
+            cout << " Hint: "s << hint;
+        }
+        cout << endl;
+        abort();
+    }
+}
+
+void AssertImpl(bool value, const string& expr_str, const string& file, const string& func, unsigned line,
+                const string& hint) {
+    if (!value) {
+        cout << file << "("s << line << "): "s << func << ": "s;
+        cout << "ASSERT("s << expr_str << ") failed."s;
+        if (!hint.empty()) {
+            cout << " Hint: "s << hint;
+        }
+        cout << endl;
+        abort();
+    }
+}
+
+void AssertAlmostEqualImpl(double lhs, const string &lhs_expr_str,
+                       double rhs, const string &rhs_expr_str,
+                       double precision, const string &file,
+                       const string &func, unsigned line,
+                       const string &hint) {
+  bool almost_equal = abs(lhs - rhs) < precision;
+  if (!almost_equal) {
+    cout << file << "("s << line << "): "s << func << ": "s;
+    cout << lhs_expr_str << " = "s << lhs
+         << " is not equal to "s
+         << rhs_expr_str << " = "s << rhs
+         << " with precision "s << precision;
+    if (!hint.empty()) {
+      cout << " Hint: "s << hint;
+    }
+    cout << endl;
+    abort();
+  }
+}
+ 
+#define RUN_TEST(func) RunTestImpl((func), #func)
+#define ASSERT(expr) AssertImpl(!!(expr), #expr, __FILE__, __FUNCTION__, __LINE__, ""s)
+#define ASSERT_EQUAL(a, b) AssertEqualImpl((a), (b), #a, #b, __FILE__, __FUNCTION__, __LINE__, ""s)
+#define ASSERT_HINT(expr, hint) AssertImpl(!!(expr), #expr, __FILE__, __FUNCTION__, __LINE__, (hint))
+#define ASSERT_EQUAL_HINT(a, b, hint) AssertEqualImpl((a), (b), #a, #b, __FILE__, __FUNCTION__, __LINE__, (hint))
+#define ASSERT_ALMOST_EQUAL(a, b, precision) AssertAlmostEqualImpl((a), (#a), (b), (#b), (precision),  __FILE__, __FUNCTION__, __LINE__, ""s)
+#define ASSERT_ALMOST_EQUAL_HINT(a, b, precision, hint) AssertAlmostEqualImpl((a), (#a), (b), (#b), (precision),  __FILE__, __FUNCTION__, __LINE__, (hint))
+
+void TestExcludeStopWordsFromAddedDocumentContent() {
+  const int             doc_id                  = 42;
+  const string          content                 = "cat in the city"s;
+  const vector<int>     ratings                 = {1, 2, 3};
+    {
+      SearchServer server;
+      server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
+      const auto found_docs = server.FindTopDocuments("in"s);
+      ASSERT_EQUAL(found_docs.size(), 1u);
+      const Document& doc0 = found_docs[0];
+      ASSERT_EQUAL(doc0.id, doc_id);
+    }
+
+    {
+      SearchServer server;
+      server.SetStopWords("in the"s);
+      server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
+      ASSERT_HINT(server.FindTopDocuments("in"s).empty(), \
+            "Stop words must be excluded from documents"s);
+    }
+}
+
+void TestQueryMatchesAndFindPlusWords() {
+  const int             doc_id                  = 42;
+  const string          content                 = "cat in the city"s;
+  const vector<int>     ratings                 = {1, 2, 3};
+  const string          query                   = "cat in"s;
+  const vector<string>  expected_matched_words  = { "cat"s, "in"s };
+    {
+      SearchServer server;
+      server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
+     
+      auto [matched_words, status] = server.MatchDocument(query, doc_id);
+      vector<Document> results = server.FindTopDocuments(query);
+
+      ASSERT_EQUAL(DocumentStatus::ACTUAL, status);
+      ASSERT_EQUAL(expected_matched_words, matched_words);
+      ASSERT_EQUAL(doc_id, results[0].id);
+      ASSERT_EQUAL(ratings[1], results[0].rating);
+      ASSERT(results.size());
+      ASSERT(results[0].relevance < 1e-6);
+    }
+}
+
+void TestQueryDoesntMatchAndDoesntFindMinusWords() {
+  const int             doc_id                  = 42;
+  const string          content                 = "cat in the city"s;
+  const vector<int>     ratings                 = {1, 2, 3};
+  const string          query                   = "in -cat"s;
+    {
+      SearchServer server;
+      server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
+
+      auto [matched_words, status] = server.MatchDocument(query, doc_id);
+      auto results = server.FindTopDocuments(query);
+      ASSERT(results.empty());
+      ASSERT(matched_words.empty());
+    }
+}
+
+void TestStopWordsChangeAffectsSearchResults() {
+  const int             doc_id                  = 42;
+  const string          content                 = "cat in the city"s;
+  const vector<int>     ratings                 = {1, 2, 3};
+  const string          query                   = "in"s;
+    {
+      SearchServer server;
+      server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
+
+      auto results = server.FindTopDocuments(query);
+      ASSERT(results.size());
+      server.SetStopWords(query);
+      results = server.FindTopDocuments(query);
+      ASSERT(results.empty());
+    }
+}
+
+void TestStopWordsChangeAffectsMatchResults() {
+  const int             doc_id                  = 42;
+  const string          content                 = "cat in the city"s;
+  const vector<int>     ratings                 = {1, 2, 3};
+  const string          query                   = "city"s;
+  const vector<string>  expect                  = { "city"s };
+    {
+      SearchServer server;
+      server.AddDocument(doc_id, content, DocumentStatus::ACTUAL, ratings);
+        {
+          auto [match, status] = server.MatchDocument(query, doc_id);
+          ASSERT_EQUAL(expect, match);
+        }
+       
+        {
+          server.SetStopWords(query);
+          auto [match, status] = server.MatchDocument(query, doc_id);
+          ASSERT(match.empty());
+        }
+    }
+}
+
+void TestAddDocument() {
+
+    const int             doc_id                  = 42;
+    const string          content                 = "cat in the city"s;
+    const vector<int>     ratings                 = {1, 2, 3};
+    const string          query                   = "city"s;
+    const vector<string>  expect                  = { "city"s };
+    const DocumentStatus  status                  = DocumentStatus::BANNED;
+      {
+        SearchServer server;
+        server.AddDocument(doc_id, content, status, ratings);
+        ASSERT_EQUAL(server.GetDocumentCount(), 1);
+        {
+          int rating_sum = 0;
+          for (const int rating : ratings) {
+              rating_sum += rating;
+          }
+          const int averager_rating = static_cast<double>(rating_sum / ratings.size());
+          auto documents = server.FindTopDocuments(query, status);
+          ASSERT(documents.size());
+          ASSERT_EQUAL(documents.at(0).id, doc_id);
+          ASSERT_EQUAL(documents.at(0).rating, averager_rating);
+        }
+        {
+          auto [words, matched_status] = server.MatchDocument(query, doc_id);
+          ASSERT_EQUAL(status, matched_status);
+        }
+      }
+}
+
+void TestSearchServer() {
+    RUN_TEST( TestExcludeStopWordsFromAddedDocumentContent  );
+    RUN_TEST( TestQueryMatchesAndFindPlusWords              ); 
+    RUN_TEST( TestQueryDoesntMatchAndDoesntFindMinusWords   );
+    RUN_TEST( TestStopWordsChangeAffectsSearchResults       );
+    RUN_TEST( TestStopWordsChangeAffectsMatchResults        );
+    RUN_TEST( TestAddDocument                               );
+}
+
 int main() {
+
+    TestSearchServer();
+
     SearchServer search_server;
     search_server.SetStopWords("и в на"s);
 
