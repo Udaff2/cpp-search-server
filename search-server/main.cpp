@@ -335,7 +335,7 @@ ostream& operator<<(ostream& out, const set<Element>& container) {
 template <typename Func>
 void RunTestImpl(Func& func, const string funct_string) {
     func();
-    cout << funct_string << " OK" << endl;
+    cerr << funct_string << " OK" << endl;
 }
 
 template <typename T, typename U>
@@ -409,10 +409,21 @@ void TestAddDocument() {
 void TestCalculationAverageRating() {
   SearchServer server;
   const vector<string> query = {{"белый"s}, {"хвост"s}, {"пёс"s}, {"скворец"s}};
-
-  for (int i = 0; i < test_documents.size(); ++i) {
-    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
-    const int avg_rating = static_cast<double>(accumulate(test_rating[i].begin(), test_rating[i].end(), 0)) / test_rating[i].size();
+  static const vector<string> test_car_documents = {
+    {"белый ухоженный кот и модный ошейник"s}, {"кот и ухоженный пушистый хвост"s},
+    {"ухоженный пёс выразительные глаза"s}, {"ухоженный скворец евгений"s}
+  };
+  static const vector<int> test_car_id = {
+    {0}, {1},
+    {2}, {3}
+  };
+  static const vector<vector<int>> test_car_rating =  {
+    {8, -3}, {7, 2, 7},
+    {5, -12, 2, 1}, {9}
+  };
+  for (int i = 0; i < test_car_documents.size(); ++i) {
+    server.AddDocument(test_car_id[i], test_car_documents[i], DocumentStatus::ACTUAL, test_car_rating[i]);
+    const int avg_rating = static_cast<double>(accumulate(test_car_rating[i].begin(), test_car_rating[i].end(), 0)) / test_car_rating[i].size();
     auto documents = server.FindTopDocuments(query[i]);
     ASSERT_EQUAL(documents.at(0).rating, avg_rating);
   }
@@ -424,9 +435,9 @@ void TestMatchDocumentPlusWords() {
   SearchServer server;
   for (int i = 0; i < test_documents.size(); ++i) {
     server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
-  auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
-  ASSERT_EQUAL(test_status[i], status);
-  ASSERT_EQUAL(expected_matched_words, matched_words);
+    auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
+    ASSERT_EQUAL(test_status[i], status);
+    ASSERT_EQUAL(expected_matched_words, matched_words);
   }
 }
 
@@ -440,6 +451,11 @@ void TestMatchDocumentMinusWords() {
       auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
       ASSERT_EQUAL(test_status[i], status);
       ASSERT_EQUAL(1u, matched_words.size());
+    }
+    {
+      const string query = "белый -кот "s;
+      auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
+      ASSERT_EQUAL(0u, matched_words.size());
     }
     {
       const string query = "-ухоженный"s;
@@ -472,22 +488,23 @@ void TestFindTopDocumentsPlusWords() {
   const string query = "белый"s;
   SearchServer server;
   for (int i = 0; i < test_documents.size(); ++i) {
-    server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
+    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
   }
   auto results = server.FindTopDocuments(query);
   ASSERT_EQUAL(1u, results.size());
+  ASSERT_EQUAL(0, results.at(0).id);
 }
 
 void TestFindTopDocumentsMinusWords() {
   SearchServer server;
   for (int i = 0; i < test_documents.size(); ++i) {
-    server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
+    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
   }
 
   {
     const string query = "ухоженный"s;
     auto search_result = server.FindTopDocuments(query);
-    ASSERT_EQUAL(3u, search_result.size());
+    ASSERT_EQUAL(4u, search_result.size());
   }
   {
     const string query = "-ухоженный"s;
@@ -562,12 +579,18 @@ void TestFindTopDocumentsUsingPredicate() {
     auto search_results = server.FindTopDocuments(query, predicate_id);
     ASSERT(search_results.empty());
   }
- 
   {
-    auto predicate_rating4 = [](int doc_id, DocumentStatus status, int rating) {
-      return rating == 4;
+    int avg_rating;
+    vector <int> avg_rating_vector;
+    for (int i = 0; i < test_rating.size(); ++i) {
+      avg_rating = static_cast<double>(accumulate(test_rating[i].begin(), test_rating[i].end(), 0)) / test_rating[i].size();
+      avg_rating_vector.push_back(avg_rating);
+    }
+    const int test_rating = *max_element( avg_rating_vector.begin(), avg_rating_vector.end() ) + 1;
+    auto predicate_rating = [test_rating](int doc_id, DocumentStatus status, int rating) {
+      return rating == test_rating;
     };
-    auto search_results = server.FindTopDocuments(query, predicate_rating4);
+    auto search_results = server.FindTopDocuments(query, predicate_rating);
     ASSERT(search_results.empty());
   }
 }
@@ -576,24 +599,23 @@ void TestFindTopDocumentsSort() {
   SearchServer server;
   const string query = "ухоженный"s;
 
+
   for (int i = 0; i < test_documents.size(); ++i) {
     server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
   }
 
   auto search_results = server.FindTopDocuments(query);
-  for (size_t i = 0; i < search_results.size(); ++i) {
-    if (0 < i) {
-      bool sort_relevance = false;
-      if (search_results.at(i).relevance == search_results.at(i-1).relevance) {
-          if(search_results.at(i).rating < search_results.at(i-1).rating) {
-              sort_relevance = true;
-          }
+  for (size_t i = 1; i < search_results.size(); ++i) {
+    bool sort_relevance = false;
+    if (abs(search_results.at(i).relevance - search_results.at(i-1).relevance) < 1e-7 ) {
+      if(search_results.at(i).rating < search_results.at(i-1).rating) {
+        sort_relevance = true;
       }
-      else if(search_results.at(i).relevance < search_results.at(i<1).relevance) {
-          sort_relevance = true;
-      }
-      ASSERT_HINT(sort_relevance, "Relevance sorting must be made properly"s);
     }
+    else if(search_results.at(i).relevance < search_results.at(i-1).relevance) {
+      sort_relevance = true;
+    }
+    ASSERT_HINT(sort_relevance, "Relevance sorting must be made properly"s);
   }
 }
 
