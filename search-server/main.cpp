@@ -385,7 +385,485 @@ void MatchDocuments(const SearchServer& search_server, const string& query) {
   }
 }
 
+static const vector<string> test_documents               = {{"белый ухоженный кот и модный ошейник"s},
+                                                            {"кот и ухоженный пушистый хвост"s},
+                                                            {"ухоженный пёс выразительные глаза"s},
+                                                            {"ухоженный скворец евгений"s}
+                                                           };
+static const vector<int> test_id                         = {{0},
+                                                            {1},
+                                                            {2},
+                                                            {3}
+                                                           };
+static const vector<vector<int>> test_rating            =  {{8, -3},
+                                                            {7, 2, 7},
+                                                            {5, -12, 2, 1},
+                                                            {9}
+                                                           };
+static const vector<DocumentStatus> test_status         =  {DocumentStatus::ACTUAL,
+                                                            DocumentStatus::ACTUAL,
+                                                            DocumentStatus::ACTUAL,
+                                                            DocumentStatus::BANNED
+                                                           };
+
+
+ostream &operator<<(ostream &os, const DocumentStatus &status) {
+  switch(status) {
+    case DocumentStatus::ACTUAL:      os << "ACTUAL"s;     break;
+    case DocumentStatus::IRRELEVANT:  os << "IRRELEVANT"s; break;
+    case DocumentStatus::BANNED:      os << "BANNED"s;     break;
+    case DocumentStatus::REMOVED:     os << "REMOVED"s;    break;
+  }
+  return os;
+}
+
+template <typename Element , typename Element2>
+ostream& operator<<(ostream& out, const map<Element, Element2>& container) {
+  int size = 0;
+  auto container_size = container.size();
+  for (auto [element_1, element_2] : container) {
+    ++size;
+    out << element_1 << ": " << element_2;
+    if (size != container_size) {
+      out << ", ";
+    }
+  }
+  return out;
+}
+
+template <typename Element>
+ostream& operator<<(ostream& out, const vector<Element>& container) {
+    int size = 0;
+    auto container_size = container.size();
+    for (const Element& element : container) {
+        ++size;
+        out << element;
+        if (size != container_size) {
+            out << ", "s;
+        }
+    }
+    return out;
+}
+
+template <typename Element>
+ostream& operator<<(ostream& out, const set<Element>& container) {
+    int size = 0;
+    auto container_size = container.size();
+    for (const Element& element : container) {
+        ++size;
+        out << element;
+        if (size == container_size) {
+          out << element << ", "s;
+        }
+    }
+    return out;
+}
+
+template <typename Func>
+void RunTestImpl(Func& func, const string funct_string) {
+    func();
+    cerr << funct_string << " OK" << endl;
+}
+
+template <typename T, typename U>
+void AssertEqualImpl(const T& t, const U& u, const string& t_str, const string& u_str, const string& file,
+                     const string& func, unsigned line, const string& hint) {
+    if (t != u) {
+        cout << boolalpha;
+        cout << file << "("s << line << "): "s << func << ": "s;
+        cout << "ASSERT_EQUAL("s << t_str << ", "s << u_str << ") failed: "s;
+        cout << t << " != "s << u << "."s;
+        if (!hint.empty()) {
+            cout << " Hint: "s << hint;
+        }
+        cout << endl;
+        abort();
+    }
+}
+
+void AssertImpl(bool value, const string& expr_str, const string& file, const string& func, unsigned line,
+                const string& hint) {
+    if (!value) {
+        cout << file << "("s << line << "): "s << func << ": "s;
+        cout << "ASSERT("s << expr_str << ") failed."s;
+        if (!hint.empty()) {
+            cout << " Hint: "s << hint;
+        }
+        cout << endl;
+        abort();
+    }
+}
+
+void AssertAlmostEqualImpl(double lhs, const string &lhs_expr_str,
+                           double rhs, const string &rhs_expr_str,
+                           double precision, const string &file,
+                           const string &func, unsigned line,
+                           const string &hint) {
+  bool almost_equal = abs(lhs - rhs) < precision;
+  if (!almost_equal) {
+    cout << file << "("s << line << "): "s << func << ": "s;
+    cout << lhs_expr_str << " = "s << lhs
+         << " is not equal to "s
+         << rhs_expr_str << " = "s << rhs
+         << " with precision "s << precision;
+    if (!hint.empty()) {
+      cout << " Hint: "s << hint;
+    }
+    cout << endl;
+    abort();
+  }
+}
+
+#define RUN_TEST(func) RunTestImpl((func), #func)
+#define ASSERT(expr) AssertImpl(!!(expr), #expr, __FILE__, __FUNCTION__, __LINE__, ""s)
+#define ASSERT_EQUAL(a, b) AssertEqualImpl((a), (b), #a, #b, __FILE__, __FUNCTION__, __LINE__, ""s)
+#define ASSERT_HINT(expr, hint) AssertImpl(!!(expr), #expr, __FILE__, __FUNCTION__, __LINE__, (hint))
+#define ASSERT_EQUAL_HINT(a, b, hint) AssertEqualImpl((a), (b), #a, #b, __FILE__, __FUNCTION__, __LINE__, (hint))
+#define ASSERT_ALMOST_EQUAL(a, b, precision) AssertAlmostEqualImpl((a), (#a), (b), (#b), (precision),  __FILE__, __FUNCTION__, __LINE__, ""s)
+#define ASSERT_ALMOST_EQUAL_HINT(a, b, precision, hint) AssertAlmostEqualImpl((a), (#a), (b), (#b), (precision),  __FILE__, __FUNCTION__, __LINE__, (hint))
+
+void TestAddDocument() {
+  SearchServer server(""s);
+  int document_size = 0;
+  ASSERT_EQUAL(document_size, server.GetDocumentCount());
+  for (int i = 0; i < test_documents.size(); ++i) {
+    ++document_size;
+    server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
+    ASSERT_EQUAL(document_size, server.GetDocumentCount());
+  }
+}
+
+void TestCalculationAverageRating() {
+  SearchServer server(""s);
+  const vector<string> query = {{"белый"s}, {"хвост"s}, {"пёс"s}, {"скворец"s}};
+  static const vector<string> test_car_documents = {
+    {"белый ухоженный кот и модный ошейник"s}, {"кот и ухоженный пушистый хвост"s},
+    {"ухоженный пёс выразительные глаза"s}, {"ухоженный скворец евгений"s}
+  };
+  static const vector<int> test_car_id = {
+    {0}, {1},
+    {2}, {3}
+  };
+  static const vector<vector<int>> test_car_rating =  {
+    {8, -3}, {7, 2, 7},
+    {5, -12, 2, 1}, {9}
+  };
+  for (int i = 0; i < test_car_documents.size(); ++i) {
+    server.AddDocument(test_car_id[i], test_car_documents[i], DocumentStatus::ACTUAL, test_car_rating[i]);
+    const int avg_rating = static_cast<double>(accumulate(test_car_rating[i].begin(), test_car_rating[i].end(), 0)) / test_car_rating[i].size();
+    auto documents = server.FindTopDocuments(query[i]);
+    ASSERT_EQUAL(documents.at(0).rating, avg_rating);
+  }
+}
+
+void TestMatchDocumentPlusWords() {
+  const string query = "ухоженный"s;
+  const vector<string> expected_matched_words = { "ухоженный"s};
+  SearchServer server(""s);
+  for (int i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
+    auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
+    ASSERT_EQUAL(test_status[i], status);
+    ASSERT_EQUAL(expected_matched_words, matched_words);
+  }
+}
+
+void TestMatchDocumentMinusWords() {
+
+  SearchServer server(""s);
+  for (int i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
+    {
+      const string query = "ухоженный"s;
+      auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
+      ASSERT_EQUAL(test_status[i], status);
+      ASSERT_EQUAL(1u, matched_words.size());
+    }
+    {
+      const string query = "белый -кот "s;
+      auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
+      ASSERT_EQUAL(0u, matched_words.size());
+    }
+    {
+      const string query = "-ухоженный"s;
+      auto [matched_words, status] = server.MatchDocument(query, test_id[i]);
+      ASSERT(matched_words.empty());
+    }
+  }
+}
+
+void TestMatchDocumentStopWords() {
+  const string query = "белый"s;
+  const string stop_word = "белый"s;
+  SearchServer server(""s);
+    for (int i = 0; i < test_documents.size(); ++i) {
+      server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
+    }
+    {
+      const auto found_docs = server.FindTopDocuments(query);
+      ASSERT_EQUAL(found_docs.size(), 1u);
+      const Document& doc0 = found_docs[0];
+      ASSERT_EQUAL(doc0.id, 0);
+    }
+    {
+      server.SetStopWords(stop_word);
+      ASSERT_HINT(server.FindTopDocuments(query).empty(), "Стоп-слова необходимо исключить из документов"s);
+    }
+}
+
+void TestFindTopDocumentsPlusWords() {
+  const string query = "белый"s;
+  SearchServer server(""s);
+  for (int i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
+  }
+  auto results = server.FindTopDocuments(query);
+  ASSERT_EQUAL(1u, results.size());
+  ASSERT_EQUAL(0, results.at(0).id);
+}
+
+void TestFindTopDocumentsMinusWords() {
+  SearchServer server(""s);
+  for (int i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
+  }
+
+  {
+    const string query = "ухоженный"s;
+    auto search_result = server.FindTopDocuments(query);
+    ASSERT_EQUAL(4u, search_result.size());
+  }
+  {
+    const string query = "-ухоженный"s;
+    auto search_result = server.FindTopDocuments(query);
+    ASSERT(search_result.empty());
+  }
+}
+
+void TestFindTopDocumentsStopWords() {
+  SearchServer server(""s);
+  const string query = "ухоженный"s;
+  for (int i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], test_status[i], test_rating[i]);
+  }
+  {
+    auto search_result = server.FindTopDocuments(query);
+    ASSERT_EQUAL(3u, search_result.size());
+  }
+  {
+    auto search_results = server.FindTopDocuments(query);
+    ASSERT_EQUAL(3u, search_results.size());
+  }
+  {
+    server.SetStopWords(query);
+    auto search_results = server.FindTopDocuments(query);
+    ASSERT(search_results.empty());
+  }
+}
+
+void TestFindTopDocumentsbyStatus() {
+  int test_documents_size = test_documents.size();
+  const string query = "ухоженный"s;
+  SearchServer server(""s);
+  for (int i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::IRRELEVANT, test_rating[i]);
+  }
+  {
+    auto search_results = server.FindTopDocuments(query);
+    ASSERT(search_results.empty());
+  }
+  {
+    auto search_results = server.FindTopDocuments(query, DocumentStatus::IRRELEVANT);
+    ASSERT_EQUAL(test_documents_size, search_results.size());
+  }
+}
+
+void TestFindTopDocumentsUsingPredicate() {
+  SearchServer server(""s);
+  const string query = "ухоженный"s;
+  for (size_t i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
+  }
+  {
+    const size_t expected_documents_count =
+        min(test_documents.size(), static_cast<size_t>(MAX_RESULT_DOCUMENT_COUNT));
+    ASSERT_EQUAL(expected_documents_count, server.FindTopDocuments(query).size());
+  }
+  {
+    const int id = 0;
+    auto predicate_id = [id](int doc_id, DocumentStatus status, int rating) {
+      return doc_id == id;
+    };
+    auto search_results = server.FindTopDocuments(query, predicate_id);
+    ASSERT_EQUAL(1u, search_results.size());
+    ASSERT_EQUAL(id, search_results.at(0).id);
+  }
+  {
+    const int id_not_exists = test_documents.size();
+    auto predicate_id = [id_not_exists](int doc_id, DocumentStatus status, int rating) {
+      return doc_id == id_not_exists;
+    };
+    auto search_results = server.FindTopDocuments(query, predicate_id);
+    ASSERT(search_results.empty());
+  }
+  {
+    int avg_rating;
+    vector <int> avg_rating_vector;
+    for (int i = 0; i < test_rating.size(); ++i) {
+      avg_rating = static_cast<double>(accumulate(test_rating[i].begin(), test_rating[i].end(), 0)) / test_rating[i].size();
+      avg_rating_vector.push_back(avg_rating);
+    }
+    const int test_rating = *max_element( avg_rating_vector.begin(), avg_rating_vector.end() ) + 1;
+    auto predicate_rating = [test_rating](int doc_id, DocumentStatus status, int rating) {
+      return rating == test_rating;
+    };
+    auto search_results = server.FindTopDocuments(query, predicate_rating);
+    ASSERT(search_results.empty());
+  }
+}
+
+void TestFindTopDocumentsSort() {
+  SearchServer server(""s);
+  const string query = "ухоженный"s;
+
+
+  for (int i = 0; i < test_documents.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents[i], DocumentStatus::ACTUAL, test_rating[i]);
+  }
+
+  auto search_results = server.FindTopDocuments(query);
+  for (size_t i = 1; i < search_results.size(); ++i) {
+    bool sort_relevance = false;
+    if (abs(search_results.at(i).relevance - search_results.at(i-1).relevance) < 1e-7 ) {
+      if(search_results.at(i).rating < search_results.at(i-1).rating) {
+        sort_relevance = true;
+      }
+    }
+    else if(search_results.at(i).relevance < search_results.at(i-1).relevance) {
+      sort_relevance = true;
+    }
+    ASSERT_HINT(sort_relevance, "Relevance sorting must be made properly"s);
+  }
+}
+
+void TestTfIdfCalculation() {
+  SearchServer server(""s);
+ 
+  const vector<string> test_documents_tf_idf = { "белый кот и модный ошейник"s,
+                                                 "пушистый кот пушистый хвост"s,
+                                                 "ухоженный пёс выразительные глаза"s,
+                                                 "ухоженный скворец евгений"s};
+ 
+   const size_t test_documents_size = test_documents_tf_idf.size();
+   const map<string, map<int, double>> tf {
+    { "белый"s,         { { 0, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "кот"s,           { { 0, 1.0/static_cast<double>(test_documents_size) },
+                          { 1, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "и"s,             { { 0, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "модный"s,        { { 0, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "ошейник"s,       { { 0, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "пушистый"s,      { { 1, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "хвост"s,         { { 1, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "ухоженный"s,     { { 2, 1.0/static_cast<double>(test_documents_size) },
+                          { 3, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "пёс"s,           { { 2, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "выразительные"s, { { 2, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "глаза"s,         { { 2, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "скворец"s,       { { 3, 1.0/static_cast<double>(test_documents_size) }, } },
+    { "евгений"s,       { { 3, 1.0/static_cast<double>(test_documents_size) }, } },
+  };
+ 
+  map<string, int> df;
+  for (const auto & [term, freqs] : tf) {
+    df[term] = freqs.size();
+  }
+  const map<string, double> idf = {
+    { "белый"s,         log( static_cast<double>(test_documents_size)/df.at("белый"s)         ) },
+    { "кот"s,           log( static_cast<double>(test_documents_size)/df.at("кот"s)           ) },
+    { "и"s,             log( static_cast<double>(test_documents_size)/df.at("и"s)             ) },
+    { "модный"s,        log( static_cast<double>(test_documents_size)/df.at("модный"s)        ) },
+    { "ошейник"s,       log( static_cast<double>(test_documents_size)/df.at("ошейник"s)       ) },
+    { "пушистый"s,      log( static_cast<double>(test_documents_size)/df.at("пушистый"s)      ) },
+    { "хвост"s,         log( static_cast<double>(test_documents_size)/df.at("хвост"s)         ) },
+    { "ухоженный"s,     log( static_cast<double>(test_documents_size)/df.at("ухоженный"s)     ) },
+    { "пёс"s,           log( static_cast<double>(test_documents_size)/df.at("пёс"s)           ) },
+    { "выразительные"s, log( static_cast<double>(test_documents_size)/df.at("выразительные"s) ) },
+    { "глаза"s,         log( static_cast<double>(test_documents_size)/df.at("глаза"s)         ) },
+    { "скворец"s,       log( static_cast<double>(test_documents_size)/df.at("скворец"s)       ) },
+    { "евгений"s,       log( static_cast<double>(test_documents_size)/df.at("евгений"s)       ) },
+  };
+ 
+  const string queries = "пушистый ухоженный кот"s;
+  vector<size_t> size_documents_tf_idf = {};
+  for (int i = 0; i < test_documents_tf_idf.size(); ++i) {
+      size_documents_tf_idf.push_back(SplitIntoWords(test_documents_tf_idf[i]).size());
+  }
+ 
+ map<size_t, map<size_t, double>> query_to_doc_relevance = {
+      { 0, {
+        { 0, 0.0/static_cast<double>(size_documents_tf_idf[0]) * idf.at("пушистый"s)   },
+        { 1, 0.0/static_cast<double>(size_documents_tf_idf[0]) * idf.at("ухоженный"s)  },
+        { 2, 1.0/static_cast<double>(size_documents_tf_idf[0]) * idf.at("кот"s)        } },
+      },
+      { 1, {
+        { 0, 2.0/static_cast<double>(size_documents_tf_idf[1]) * idf.at("пушистый"s)   },
+        { 1, 0.0/static_cast<double>(size_documents_tf_idf[1]) * idf.at("ухоженный"s)  },
+        { 2, 1.0/static_cast<double>(size_documents_tf_idf[1]) * idf.at("кот"s)        } },
+      },
+      { 2, {
+        { 0, 0.0/static_cast<double>(size_documents_tf_idf[2]) * idf.at("пушистый"s)   },
+        { 1, 1.0/static_cast<double>(size_documents_tf_idf[2]) * idf.at("ухоженный"s)  },
+        { 2, 0.0/static_cast<double>(size_documents_tf_idf[2]) * idf.at("кот"s)        } },
+      },
+      { 3, {
+        { 0, 0.0/static_cast<double>(size_documents_tf_idf[3]) * idf.at("пушистый"s)   },
+        { 1, 1.0/static_cast<double>(size_documents_tf_idf[3]) * idf.at("ухоженный"s)  },
+        { 2, 0.0/static_cast<double>(size_documents_tf_idf[3]) * idf.at("кот"s)        } },
+      }
+    };
+  map<int, double> tf_idf_relevance;
+  for (const auto [query_id, term_freq] : query_to_doc_relevance) {
+    for (const auto & [int_0, int_1] : term_freq) {
+      tf_idf_relevance[query_id] += int_1;
+    }
+  }
+ 
+  for (int i = 0; i < test_documents_tf_idf.size(); ++i) {
+    server.AddDocument(test_id[i], test_documents_tf_idf[i], test_status[i], test_rating[i]);
+  }
+
+  auto search_results = server.FindTopDocuments("пушистый ухоженный кот"s);
+  for (size_t i = 0; i < tf_idf_relevance.size(); ++i) {
+        auto search_results = server.FindTopDocuments(queries);
+        for (const auto & doc : search_results) {
+          const double expected_relevance = tf_idf_relevance.at(doc.id);
+          ASSERT_EQUAL(doc.relevance, expected_relevance);
+        }
+  }
+}
+
+void TestSearchServer() {
+
+    RUN_TEST( TestAddDocument                    );
+    RUN_TEST( TestMatchDocumentStopWords         );
+    RUN_TEST( TestMatchDocumentPlusWords         );
+    RUN_TEST( TestMatchDocumentMinusWords        );
+    RUN_TEST( TestFindTopDocumentsPlusWords      );
+    RUN_TEST( TestFindTopDocumentsMinusWords     );
+    RUN_TEST( TestFindTopDocumentsStopWords      );
+    RUN_TEST( TestCalculationAverageRating       );
+    RUN_TEST( TestFindTopDocumentsbyStatus       );
+    RUN_TEST( TestFindTopDocumentsSort           );
+    RUN_TEST( TestTfIdfCalculation               );
+    RUN_TEST( TestFindTopDocumentsUsingPredicate );
+
+}
+
 int main() {
+
+  TestSearchServer();
+  cout << "Search server testing finished"s << endl;
+
   SearchServer search_server("и в на"s);
 
   AddDocument(search_server, 1, "пушистый кот пушистый хвост"s, DocumentStatus::ACTUAL, {7, 2, 7});
@@ -402,4 +880,5 @@ int main() {
   MatchDocuments(search_server, "модный -кот"s);
   MatchDocuments(search_server, "модный --пёс"s);
   MatchDocuments(search_server, "пушистый - хвост"s);
+
 } 
