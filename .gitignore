@@ -1,3 +1,8 @@
+search-server/*
+!search-server/*.h
+!search-server/*.cpp
+
+
 # Prerequisites
 *.d
 
