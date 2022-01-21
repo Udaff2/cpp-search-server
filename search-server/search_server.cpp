@@ -29,7 +29,6 @@ using namespace std;
             documents_.erase(document_id);
             document_words_freqs_.erase(document_id);
         }
-        return;
     }
 
     vector<Document> SearchServer::FindTopDocuments(const string& raw_query, DocumentStatus status) const {
