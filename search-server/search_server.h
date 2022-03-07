@@ -48,13 +48,8 @@ public:
     void RemoveDocument(const std::execution::parallel_policy&, int document_id);
     void RemoveDocument(const std::execution::sequenced_policy&, int document_id);
     
-    auto begin() const {
-        return document_ids_.cbegin();
-    }
-
-    auto end() const {
-        return document_ids_.cend();
-    }
+    std::set<int>::const_iterator begin() const;
+    std::set<int>::const_iterator end() const;
     
     std::tuple<std::vector<std::string_view>, DocumentStatus> MatchDocument(const std::string_view raw_query, int document_id) const;
     std::tuple<std::vector<std::string_view>, DocumentStatus> MatchDocument(const std::execution::parallel_policy&, const std::string_view raw_query, int document_id) const;
@@ -201,19 +196,6 @@ std::vector<Document> SearchServer::FindAllDocuments(const std::execution::paral
 
     std::for_each(
             std::execution::par,
-            query.minus_words.begin(),
-            query.minus_words.end(),
-            [this, &document_to_relevance](std::string_view word){
-                if (word_to_document_freqs_.count(word) == 0) {
-                    return;
-                }
-                for (const auto [document_id, _] : word_to_document_freqs_.at(word)) {
-                    document_to_relevance.erase(document_id);
-                }
-            });
-
-    std::for_each(
-            std::execution::par,
             query.plus_words.begin(),
             query.plus_words.end(),
             [this, document_predicate, &document_to_relevance](std::string_view word){
@@ -226,6 +208,19 @@ std::vector<Document> SearchServer::FindAllDocuments(const std::execution::paral
                     if (document_predicate(document_id, document_data.status, document_data.rating)) {
                         document_to_relevance[document_id].ref_to_value += term_freq * inverse_document_freq;
                     }
+                }
+            });
+            
+    std::for_each(
+            std::execution::par,
+            query.minus_words.begin(),
+            query.minus_words.end(),
+            [this, &document_to_relevance](std::string_view word){
+                if (word_to_document_freqs_.count(word) == 0) {
+                    return;
+                }
+                for (const auto [document_id, _] : word_to_document_freqs_.at(word)) {
+                    document_to_relevance.erase(document_id);
                 }
             });
 

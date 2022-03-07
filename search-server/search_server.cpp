@@ -81,6 +81,14 @@ void SearchServer::RemoveDocument(int document_id) {
     RemoveDocument(std::execution::seq, document_id);
 }
 
+set<int>::const_iterator SearchServer::begin() const {
+    return document_ids_.begin();
+}
+set<int>::const_iterator SearchServer::end() const {
+    return document_ids_.end();
+}
+
+
 std::tuple<std::vector<std::string_view>, DocumentStatus> SearchServer::MatchDocument(const std::execution::sequenced_policy&, std::string_view raw_query, int document_id) const {
     if (!document_ids_.count(document_id)) {
         throw std::out_of_range("incorrect document_id");
